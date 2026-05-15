@@ -74,7 +74,13 @@ class AiderDeskConnector : CoroutineScope {
 
         launch {
             try {
-                LOG.info("Attempting to connect project ${project.name} to AiderDesk server on port 24337")
+                val aiderDeskUrl = ApplicationManager.getApplication()
+                    .getService(AiderDeskSettingsState::class.java)
+                    .aiderDeskUrl
+                    .trim()
+                    .trimEnd('/')
+                    .ifBlank { AiderDeskSettingsState.DEFAULT_AIDER_DESK_URL }
+                LOG.info("Attempting to connect project ${project.name} to AiderDesk server at $aiderDeskUrl")
                 val opts = IO.Options.builder()
                     .setForceNew(true) // Force a new connection
                     .setReconnection(true) // Enable auto-reconnection
@@ -83,7 +89,7 @@ class AiderDeskConnector : CoroutineScope {
                     .setReconnectionDelayMax(5000) // Max delay between attempts
                     .setTimeout(10000) // Connection timeout
                     .build()
-                val socket = IO.socket("http://localhost:24337", opts)
+                val socket = IO.socket(aiderDeskUrl, opts)
 
                 socket.on(Socket.EVENT_CONNECT) {
                     LOG.info("Socket.IO connection established successfully for project ${project.name}")
@@ -294,6 +300,53 @@ class AiderDeskConnector : CoroutineScope {
 
         // Connect the project and send initial open files
         connectProject(project)
+    }
+
+    fun syncWorkspace(project: Project) {
+        if (!isRunning) {
+            LOG.warn("Cannot sync workspace for ${project.name}, AiderDeskConnector is not running.")
+            return
+        }
+
+        if (!projects.contains(project)) {
+            LOG.warn("Cannot sync workspace for ${project.name}, project connector is not active.")
+            return
+        }
+
+        if (getConnectionStatus(project) != ConnectionStatus.CONNECTED) {
+            LOG.warn("Cannot sync workspace for ${project.name}, socket is not connected. Status: ${getConnectionStatus(project)}")
+            return
+        }
+
+        val projectBasePath = project.basePath ?: run {
+            LOG.warn("Cannot sync workspace for ${project.name}, project base path is null.")
+            return
+        }
+
+        val openFiles = FileEditorManager.getInstance(project).openFiles
+        var syncedFileCount = 0
+
+        for (file in openFiles) {
+            if (!file.isFile || file.fileType.isBinary) {
+                continue
+            }
+
+            if (!file.path.startsWith(projectBasePath) || isIgnoredByGit(project, file)) {
+                continue
+            }
+
+            val relativePath = try {
+                Path.of(projectBasePath).relativize(Path.of(file.path)).toString().replace("\\", "/")
+            } catch (e: IllegalArgumentException) {
+                LOG.warn("Failed to relativize open file path ${file.path} with base path $projectBasePath. Skipping.", e)
+                continue
+            }
+
+            sendMessage(FileMessage("add-file", relativePath, projectBasePath, "intellij"))
+            syncedFileCount++
+        }
+
+        LOG.info("Sync workspace completed for project ${project.name}, sent add-file messages: $syncedFileCount")
     }
 
     private fun sendInitMessage(project: Project) {

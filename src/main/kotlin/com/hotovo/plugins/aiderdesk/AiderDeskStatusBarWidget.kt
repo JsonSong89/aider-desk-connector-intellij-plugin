@@ -95,6 +95,18 @@ class AiderDeskStatusBarWidget(project: Project) : EditorBasedWidget(project), S
         }
         actionGroup.add(disconnectAction)
 
+        val syncWorkspaceAction = object : AnAction("Sync Workspace") {
+            override fun actionPerformed(e: AnActionEvent) {
+                val appService = ApplicationManager.getApplication().getService(AiderDeskConnectorAppService::class.java)
+                project.let { appService.syncWorkspace(it) }
+            }
+
+            override fun update(e: AnActionEvent) {
+                e.presentation.isEnabledAndVisible = currentStatus == ConnectionStatus.CONNECTED
+            }
+        }
+        actionGroup.add(syncWorkspaceAction)
+
         // Create and show the popup
         val popup = JBPopupFactory.getInstance()
             .createActionGroupPopup(

@@ -4,11 +4,13 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
+import com.hotovo.plugins.aiderdesk.PathUtils
 
 @Service(Service.Level.APP)
 class AiderDeskConnectorAppService : Disposable {
     private val LOG = Logger.getInstance(AiderDeskConnectorAppService::class.java)
     private val aiderDeskConnector: AiderDeskConnector = AiderDeskConnector()
+    private val restClient: AiderDeskRestClient = AiderDeskRestClient()
 
     init {
         LOG.info("AiderDesk Connector instance created")
@@ -43,6 +45,28 @@ class AiderDeskConnectorAppService : Disposable {
 
     fun sendFileMessage(message: FileMessage) {
         aiderDeskConnector.sendMessage(message)
+    }
+
+    fun syncWorkspace(project: Project) {
+        aiderDeskConnector.syncWorkspace(project)
+    }
+
+    fun runPrompt(project: Project, prompt: String): Boolean {
+        val projectDir = project.basePath ?: run {
+            LOG.warn("Project base path is null for project: ${project.name}")
+            return false
+        }
+        val normalizedProjectDir = PathUtils.normalizeProjectDir(projectDir)
+        return restClient.postPromptAction("run-prompt", normalizedProjectDir, prompt)
+    }
+
+    fun savePrompt(project: Project, prompt: String): Boolean {
+        val projectDir = project.basePath ?: run {
+            LOG.warn("Project base path is null for project: ${project.name}")
+            return false
+        }
+        val normalizedProjectDir = PathUtils.normalizeProjectDir(projectDir)
+        return restClient.postPromptAction("save-prompt", normalizedProjectDir, prompt)
     }
 
     fun reconnect(project: Project) {

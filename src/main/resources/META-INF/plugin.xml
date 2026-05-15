@@ -29,6 +29,14 @@
     <change-notes><![CDATA[
     <p>0.6.1</p>
     <ul>
+      <li>Added 'Save Prompt' action to save selected text as a prompt in AiderDesk.</li>
+      <li>Added 'Run Prompt' action to run selected text as a prompt in AiderDesk.</li>
+      <li>Added 'Sync Workspace' action in status bar widget to manually sync workspace files with AiderDesk.</li>
+      <li>Added ability to configure AiderDesk remote address in plugin settings (Settings > AiderDesk).</li>
+    </ul>
+    <br/>
+    <p>0.6.0</p>
+    <ul>
       <li>Verified compatibility with IntelliJ IDEA 2026.1.</li>
       <li>This release now targets IntelliJ IDEA 2026.1 as the minimum supported version.</li>
       <li>Older IntelliJ IDEA versions were not tested and are not recommended for this release.</li>
@@ -74,6 +82,10 @@
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
         <applicationService serviceImplementation="com.hotovo.plugins.aiderdesk.AiderDeskConnectorAppService"/>
+        <applicationService serviceImplementation="com.hotovo.plugins.aiderdesk.AiderDeskSettingsState"/>
+        <applicationConfigurable instance="com.hotovo.plugins.aiderdesk.AiderDeskSettingsConfigurable"
+                                 id="com.hotovo.plugins.aiderdesk.settings"
+                                 displayName="AiderDesk"/>
         <postStartupActivity implementation="com.hotovo.plugins.aiderdesk.AiderDeskConnectorPluginStartupActivity"/>
         <statusBarWidgetFactory implementation="com.hotovo.plugins.aiderdesk.AiderDeskStatusBarWidgetFactory"
                                 id="AiderDeskStatus"
@@ -97,6 +109,16 @@
                 text="Drop from Context"
                 description="Removes the selected file from the AiderDesk context.">
         </action>
+        <action id="AiderDesk.SavePrompt"
+                class="com.hotovo.plugins.aiderdesk.actions.AiderDeskSavePromptAction"
+                text="Save Prompt"
+                description="Saves the selected text as a prompt in AiderDesk.">
+        </action>
+        <action id="AiderDesk.RunPrompt"
+                class="com.hotovo.plugins.aiderdesk.actions.AiderDeskRunPromptAction"
+                text="Run Prompt"
+                description="Runs the selected text as a prompt in AiderDesk.">
+        </action>
 
         <!-- Group for Project View Popup Menu -->
         <group id="AiderDesk"
@@ -107,6 +129,9 @@
             <reference ref="AiderDesk.AddFile"/>
             <reference ref="AiderDesk.DropFile"/>
             <reference ref="AiderDesk.AddReadOnlyFile"/>
+            <separator/>
+            <reference ref="AiderDesk.SavePrompt"/>
+            <reference ref="AiderDesk.RunPrompt"/>
             <add-to-group group-id="ProjectViewPopupMenu"/>
             <add-to-group group-id="EditorPopupMenu"/>
             <add-to-group group-id="EditorTabPopupMenu"/>
