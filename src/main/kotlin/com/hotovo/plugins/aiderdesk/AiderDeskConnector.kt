@@ -44,6 +44,7 @@ class AiderDeskConnector : CoroutineScope {
     private val projectManagerListeners = ConcurrentHashMap<Project, ProjectManagerListener>()
     private val projectMessageBusConnections = ConcurrentHashMap<Project, MessageBusConnection>()
     private val projectSockets = ConcurrentHashMap<Project, Socket>()
+    private val projectJobs = ConcurrentHashMap<Project, Job>()
     private val projectConnectionStatus = ConcurrentHashMap<Project, ConnectionStatus>()
     @Volatile private var isRunning = false
 
@@ -83,10 +84,7 @@ class AiderDeskConnector : CoroutineScope {
                 LOG.info("Attempting to connect project ${project.name} to AiderDesk server at $aiderDeskUrl")
                 val opts = IO.Options.builder()
                     .setForceNew(true) // Force a new connection
-                    .setReconnection(true) // Enable auto-reconnection
-                    .setReconnectionAttempts(Int.MAX_VALUE) // Keep trying indefinitely
-                    .setReconnectionDelay(1000) // Initial delay
-                    .setReconnectionDelayMax(5000) // Max delay between attempts
+                    .setReconnection(false) // Disable auto-reconnection, we handle it manually
                     .setTimeout(10000) // Connection timeout
                     .build()
                 val socket = IO.socket(aiderDeskUrl, opts)
@@ -102,9 +100,6 @@ class AiderDeskConnector : CoroutineScope {
                     // Only set to disconnected if we are not shutting down
                     if (isRunning && projects.contains(project)) {
                         updateProjectStatus(project, ConnectionStatus.DISCONNECTED)
-
-                        // Reconnect
-                        socket.connect()
                     }
                 }
 
@@ -125,12 +120,44 @@ class AiderDeskConnector : CoroutineScope {
                 socket.connect()
                 projectSockets[project] = socket
 
-                // Keep the connection alive while the project is active
-                while (isRunning && projects.contains(project)) {
-                    delay(1000)
+                // Keep the connection alive and handle reconnection with exponential backoff
+                var retryCount = 0
+                val job = launch {
+                    try {
+                        while (isActive) {
+                            val status = projectConnectionStatus[project] ?: ConnectionStatus.DISCONNECTED
+                            when {
+                                status == ConnectionStatus.CONNECTED -> {
+                                    retryCount = 0 // reset on success
+                                    delay(1000)
+                                }
+                                status == ConnectionStatus.DISCONNECTED || status == ConnectionStatus.ERROR -> {
+                                    val delayMs = minOf(1000L * (1L shl retryCount.coerceAtMost(6)), 60_000L)
+                                    retryCount++
+                                    LOG.info("Reconnecting project ${project.name} in ${delayMs}ms (attempt $retryCount)")
+                                    delay(delayMs)
+                                    if (!isActive) break
+                                    updateProjectStatus(project, ConnectionStatus.CONNECTING)
+                                    try {
+                                        socket.connect()
+                                    } catch (e: Exception) {
+                                        LOG.error("Reconnection attempt failed for project ${project.name}", e)
+                                        updateProjectStatus(project, ConnectionStatus.DISCONNECTED)
+                                    }
+                                }
+                                status == ConnectionStatus.CONNECTING -> {
+                                    delay(2000) // wait for connection result
+                                }
+                            }
+                        }
+                    } finally {
+                        // Cleanup if the job is cancelled while still active
+                        if (projects.contains(project)) {
+                            disconnectProjectInternal(project)
+                        }
+                    }
                 }
-                // If the loop exits because the project is no longer active or isRunning is false
-                disconnectProjectInternal(project)
+                projectJobs[project] = job
             } catch (e: Exception) {
                 LOG.error("Error in Socket.IO connection coroutine for project ${project.name}", e)
                 updateProjectStatus(project, ConnectionStatus.ERROR)
@@ -151,6 +178,8 @@ class AiderDeskConnector : CoroutineScope {
 
     // Internal disconnect logic without status update (status handled by caller or stop())
     private fun disconnectProjectInternal(project: Project) {
+        // Cancel the coroutine job for this project first
+        projectJobs.remove(project)?.cancel()
         projectSockets.remove(project)?.let { socket ->
             try {
                 LOG.info("Disconnecting socket for project ${project.name}")
@@ -188,8 +217,12 @@ class AiderDeskConnector : CoroutineScope {
                 updateProjectStatus(project, ConnectionStatus.DISCONNECTED) // Update status last
             }
 
+            // Cancel any remaining project jobs
+            projectJobs.values.forEach { it.cancel() }
+
             // Clear all tracking maps
             projects.clear()
+            projectJobs.clear()
             projectSockets.clear()
             projectConnectionStatus.clear()
             projectFileEditorListeners.clear()
@@ -401,7 +434,7 @@ class AiderDeskConnector : CoroutineScope {
         if (!isRunning) return
         val socket = projectSockets[project]
         if (socket == null || !socket.connected()) {
-            LOG.warn("Cannot send message, socket not connected for project ${project.name}. Status: ${getConnectionStatus(project)}")
+            LOG.debug("Cannot send message, socket not connected for project ${project.name}. Status: ${getConnectionStatus(project)}")
             return
         }
         try {
@@ -424,7 +457,7 @@ class AiderDeskConnector : CoroutineScope {
 
         val socket = projectSockets[project]
         if (socket == null || !socket.connected()) {
-            LOG.warn("Cannot send message, socket not connected for project ${project.name}. Status: ${getConnectionStatus(project)}")
+            LOG.debug("Cannot send message, socket not connected for project ${project.name}. Status: ${getConnectionStatus(project)}")
             return
         }
 

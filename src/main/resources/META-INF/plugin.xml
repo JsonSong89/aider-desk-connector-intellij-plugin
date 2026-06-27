@@ -27,6 +27,12 @@
   ]]></description>
 
     <change-notes><![CDATA[
+    <p>0.6.2</p>
+    <ul>
+      <li>Fixed log storm and CPU usage when AiderDesk server is not running (exponential backoff reconnection).</li>
+      <li>Fixed IllegalArgumentException in fileClosed listener when file has different filesystem root.</li>
+    </ul>
+    <br/>
     <p>0.6.1</p>
     <ul>
       <li>Added 'Save Prompt' action to save selected text as a prompt in AiderDesk.</li>
